@@ -7,7 +7,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.amp import autocast, GradScaler
 from PIL import Image
+from tqdm import tqdm
 import timm
 
 
@@ -58,32 +60,40 @@ def _train_dino(cfg, paths, device, log_fn):
     from lightly.models.utils import update_momentum
     from lightly.utils.scheduler import cosine_schedule
 
-    tf = DINOTransform(global_crop_size=cfg.img_size, local_crop_size=cfg.img_size // 2,
+    sz = cfg.ssl_img_size
+    tf = DINOTransform(global_crop_size=sz, local_crop_size=sz // 2,
+                       n_local_views=cfg.ssl_local_crops,
                        normalize={"mean": cfg.mean, "std": cfg.std})
     dl = DataLoader(_ImgPaths(paths, tf), batch_size=cfg.ssl_batch, shuffle=True,
-                    num_workers=cfg.num_workers, collate_fn=_dino_collate, drop_last=True)
+                    num_workers=cfg.num_workers, collate_fn=_dino_collate,
+                    drop_last=True, pin_memory=True)
     model = _DINO(cfg.ssl_backbone).to(device)
     criterion = DINOLoss(output_dim=2048, warmup_teacher_temp_epochs=5).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.ssl_lr, weight_decay=1e-4)
+    use_cuda = device == "cuda"
+    scaler = GradScaler(enabled=use_cuda)
 
     for ep in range(cfg.ssl_epochs):
         m = cosine_schedule(ep, cfg.ssl_epochs, 0.996, 1.0)
         update_momentum(model.student_backbone, model.teacher_backbone, m)
         update_momentum(model.student_head, model.teacher_head, m)
         tot = 0.0
-        for views in dl:
-            views = [v.to(device) for v in views]
-            global_views = views[:2]
-            teacher_out = [model.forward_teacher(v) for v in global_views]
-            student_out = [model.forward(v) for v in views]
-            loss = criterion(teacher_out, student_out, epoch=ep)
+        pbar = tqdm(dl, desc=f"DINO ep{ep+1}/{cfg.ssl_epochs}", leave=False)
+        for views in pbar:
+            views = [v.to(device, non_blocking=True) for v in views]
+            with autocast("cuda", enabled=use_cuda):
+                teacher_out = [model.forward_teacher(v) for v in views[:2]]
+                student_out = [model.forward(v) for v in views]
+                loss = criterion(teacher_out, student_out, epoch=ep)
             opt.zero_grad()
-            loss.backward()
+            scaler.scale(loss).backward()
             model.student_head.cancel_last_layer_gradients(current_epoch=ep)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             tot += loss.item()
+            pbar.set_postfix(loss=f"{loss.item():.3f}")
         if log_fn:
-            log_fn({"ssl_epoch": ep, "ssl_loss": tot / len(dl), "momentum": m})
+            log_fn({"ssl_epoch": ep, "ssl_loss": tot / max(1, len(dl)), "momentum": float(m)})
     return model.student_backbone.state_dict()
 
 
@@ -108,25 +118,32 @@ def _train_simsiam(cfg, paths, device, log_fn):
     from lightly.transforms import SimSiamTransform
     from lightly.loss import NegativeCosineSimilarity
 
-    tf = SimSiamTransform(input_size=cfg.img_size,
+    tf = SimSiamTransform(input_size=cfg.ssl_img_size,
                           normalize={"mean": cfg.mean, "std": cfg.std})
     dl = DataLoader(_ImgPaths(paths, tf), batch_size=cfg.ssl_batch, shuffle=True,
-                    num_workers=cfg.num_workers, drop_last=True)
+                    num_workers=cfg.num_workers, drop_last=True, pin_memory=True)
     model = _SimSiam(cfg.ssl_backbone).to(device)
     criterion = NegativeCosineSimilarity()
     opt = torch.optim.SGD(model.parameters(), lr=cfg.ssl_lr * cfg.ssl_batch / 256,
                           momentum=0.9, weight_decay=1e-4)
+    use_cuda = device == "cuda"
+    scaler = GradScaler(enabled=use_cuda)
     for ep in range(cfg.ssl_epochs):
         tot = 0.0
-        for views in dl:
-            x0, x1 = views[0].to(device), views[1].to(device)
-            z0, p0 = model(x0)
-            z1, p1 = model(x1)
-            loss = 0.5 * (criterion(p0, z1) + criterion(p1, z0))
-            opt.zero_grad(); loss.backward(); opt.step()
+        pbar = tqdm(dl, desc=f"SimSiam ep{ep+1}/{cfg.ssl_epochs}", leave=False)
+        for views in pbar:
+            x0, x1 = views[0].to(device, non_blocking=True), views[1].to(device, non_blocking=True)
+            with autocast("cuda", enabled=use_cuda):
+                z0, p0 = model(x0)
+                z1, p1 = model(x1)
+                loss = 0.5 * (criterion(p0, z1) + criterion(p1, z0))
+            opt.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.step(opt); scaler.update()
             tot += loss.item()
+            pbar.set_postfix(loss=f"{loss.item():.3f}")
         if log_fn:
-            log_fn({"ssl_epoch": ep, "ssl_loss": tot / len(dl)})
+            log_fn({"ssl_epoch": ep, "ssl_loss": tot / max(1, len(dl))})
     return model.backbone.state_dict()
 
 

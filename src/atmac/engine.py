@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.amp import autocast, GradScaler
+from tqdm import tqdm
 from timm.utils import ModelEmaV2
 
 from .data import ArtDataset, build_transforms
@@ -108,23 +110,30 @@ def train_one_fold(cfg, train, photo_dir, fold, mat_cols,
     ema = ModelEmaV2(model, decay=cfg.ema_decay)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.epochs)
+    use_cuda = device == "cuda"
+    scaler = GradScaler(enabled=use_cuda)
 
     y_val = va_df["target"].to_numpy()
     best = {"rmse": 1e9, "ema_state": None}
     for ep in range(cfg.epochs):
         model.train()
         tl = 0.0
-        for x, y in tr_dl:
-            x = x.to(device)
-            y = {k: v.to(device) for k, v in y.items()}
+        pbar = tqdm(tr_dl, desc=f"FT {cfg.task} f{fold} ep{ep+1}/{cfg.epochs}", leave=False)
+        for x, y in pbar:
+            x = x.to(device, non_blocking=True)
+            y = {k: v.to(device, non_blocking=True) for k, v in y.items()}
             lam, perm = 1.0, None
             if cfg.use_mixup:
                 x, lam, perm = _mix(x, cfg.mixup_alpha)
-            out = model(x)
-            loss = _multitask_loss(cfg, out, y, lam, perm)
-            opt.zero_grad(); loss.backward(); opt.step()
+            with autocast("cuda", enabled=use_cuda):
+                out = model(x)
+                loss = _multitask_loss(cfg, out, y, lam, perm)
+            opt.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.step(opt); scaler.update()
             ema.update(model)
             tl += loss.item() * x.size(0)
+            pbar.set_postfix(loss=f"{loss.item():.3f}")
         sched.step()
         main, _ = _predict(cfg, ema.module, va_dl, device)
         v = rmse(_to_continuous(cfg, main), y_val)

@@ -21,9 +21,11 @@ class CFG:
     # ---- SSL 事前学習 ----
     ssl_method: str = "dino"            # dino | simsiam
     ssl_backbone: str = "resnet18d"
-    ssl_epochs: int = 100               # 本番は300+推奨。まず100で疎通
-    ssl_batch: int = 64
+    ssl_epochs: int = 100               # 本番は300+推奨
+    ssl_img_size: int = 128             # SSLは低解像度で十分高速（FTは img_size=224）
+    ssl_batch: int = 128
     ssl_lr: float = 5e-4
+    ssl_local_crops: int = 6            # DINOローカルクロップ数（減らすと高速）
 
     # ---- ファインチューニング ----
     backbone: str = "resnet18d"

@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--ssl_method", default="dino")
     ap.add_argument("--ssl_epochs", type=int, default=100)
+    ap.add_argument("--ssl_img_size", type=int, default=128)
     ap.add_argument("--backbone", default="resnet18d")
     ap.add_argument("--ft_epochs", type=int, default=30)
     ap.add_argument("--img_size", type=int, default=224)
@@ -52,7 +53,8 @@ def main():
     sdir = os.path.join(a.out_dir, "submissions"); os.makedirs(sdir, exist_ok=True)
 
     cfg = CFG(data_dir=a.data_dir, out_dir=a.out_dir, ssl_method=a.ssl_method,
-              ssl_epochs=a.ssl_epochs, ssl_backbone=a.backbone, backbone=a.backbone,
+              ssl_epochs=a.ssl_epochs, ssl_img_size=a.ssl_img_size,
+              ssl_backbone=a.backbone, backbone=a.backbone,
               epochs=a.ft_epochs, img_size=a.img_size, batch_size=a.batch_size)
 
     def wlog(d):
@@ -70,7 +72,7 @@ def main():
     print(f"train {train.shape} | test {len(test)} | mat_cols {len(mat_cols)}")
 
     # ---- Phase A: SSL（キャッシュ）----
-    ssl_path = os.path.join(mdir, f"ssl_{a.ssl_method}_{a.backbone}_{a.img_size}_{a.ssl_epochs}ep.pth")
+    ssl_path = os.path.join(mdir, f"ssl_{a.ssl_method}_{a.backbone}_{a.ssl_img_size}_{a.ssl_epochs}ep.pth")
     if os.path.exists(ssl_path):
         print(f"[SSL] cache hit: {ssl_path}")
         ssl_state = torch.load(ssl_path, map_location="cpu")
