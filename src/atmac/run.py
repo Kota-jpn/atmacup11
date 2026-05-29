@@ -75,9 +75,12 @@ def main():
     train, mat_cols = D.build_targets(train, materials, cfg.min_mat_count)
     print(f"train {train.shape} | test {len(test)} | mat_cols {len(mat_cols)}")
 
-    # ---- Phase A: SSL（キャッシュ）----
-    ssl_path = os.path.join(mdir, f"ssl_{a.ssl_method}_{a.backbone}_{a.ssl_img_size}_{a.ssl_epochs}ep.pth")
-    if os.path.exists(ssl_path):
+    # ---- Phase A: SSL（キャッシュ）。none ならスキップ＝スクラッチFT ----
+    if a.ssl_method == "none":
+        print("[SSL] skip (scratch baseline)")
+        ssl_state = None
+    elif os.path.exists(ssl_path := os.path.join(
+            mdir, f"ssl_{a.ssl_method}_{a.backbone}_{a.ssl_img_size}_{a.ssl_epochs}ep.pth")):
         print(f"[SSL] cache hit: {ssl_path}")
         ssl_state = torch.load(ssl_path, map_location="cpu")
     else:
@@ -102,7 +105,7 @@ def main():
         test_pred = np.zeros(len(test))
         val_feat = test_feat = None   # 特徴次元はbackboneから動的に確保
         for fold in range(cfg.n_folds):
-            ck = os.path.join(cdir, f"ft_{task}_{a.backbone}_f{fold}.npz")
+            ck = os.path.join(cdir, f"ft_{a.ssl_method}_{task}_{a.backbone}_f{fold}.npz")
             if os.path.exists(ck):
                 z = np.load(ck)
                 print(f"[FT {task} f{fold}] cache hit (rmse {float(z['best_rmse']):.4f})")

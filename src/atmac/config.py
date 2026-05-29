@@ -24,7 +24,7 @@ class CFG:
     ssl_epochs: int = 100               # 本番は300+推奨
     ssl_img_size: int = 128             # SSLは低解像度で十分高速（FTは img_size=224）
     ssl_batch: int = 256                # A100 40GBで活用（ステップ数半減）
-    ssl_lr: float = 1e-3                # lightly DINO標準。warmup+cosineで運用
+    ssl_lr: float = 5e-4                # 1e-3はDINO不安定(loss上昇)→5e-4に戻す
     ssl_warmup_epochs: int = 10         # SSL LR linear warmup
     ssl_local_crops: int = 6            # DINOローカルクロップ数（減らすと高速）
     ckpt_every: int = 10                # SSLチェックポイント保存間隔（切断対策）
