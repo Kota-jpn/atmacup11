@@ -42,19 +42,23 @@ def main():
     ap.add_argument("--img_size", type=int, default=224)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--tasks", default="cls,reg")
+    ap.add_argument("--num_workers", type=int, default=8)
+    ap.add_argument("--ssl_batch", type=int, default=256)
     ap.add_argument("--wandb", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="デバッグ: train/testを各N行に縮小")
     a = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        torch.backends.cudnn.benchmark = True
     photo_dir = os.path.join(a.data_dir, "photos")
     mdir = os.path.join(a.out_dir, "models"); os.makedirs(mdir, exist_ok=True)
     cdir = os.path.join(a.out_dir, "cache"); os.makedirs(cdir, exist_ok=True)
     sdir = os.path.join(a.out_dir, "submissions"); os.makedirs(sdir, exist_ok=True)
 
     cfg = CFG(data_dir=a.data_dir, out_dir=a.out_dir, ssl_method=a.ssl_method,
-              ssl_epochs=a.ssl_epochs, ssl_img_size=a.ssl_img_size,
-              ssl_backbone=a.backbone, backbone=a.backbone,
+              ssl_epochs=a.ssl_epochs, ssl_img_size=a.ssl_img_size, ssl_batch=a.ssl_batch,
+              ssl_backbone=a.backbone, backbone=a.backbone, num_workers=a.num_workers,
               epochs=a.ft_epochs, img_size=a.img_size, batch_size=a.batch_size)
 
     def wlog(d):
@@ -82,7 +86,8 @@ def main():
         print(f"[SSL] {a.ssl_method} {a.ssl_epochs}ep on {len(train)+len(test)} imgs ...")
         paths = [os.path.join(photo_dir, f"{o}.jpg")
                  for o in pd.concat([train.object_id, test.object_id])]
-        ssl_state = pretrain_ssl(cfg, paths, device=device, log_fn=wlog)
+        ssl_state = pretrain_ssl(cfg, paths, device=device, log_fn=wlog,
+                                 ckpt_path=ssl_path + ".ckpt")
         torch.save(ssl_state, ssl_path)
         if a.wandb and wandb and wandb.run:
             wandb.finish()
@@ -95,8 +100,7 @@ def main():
         cfg.use_mixup = (task == "cls")   # 回帰はmixup無効（世紀の中間が無意味）
         oof = np.zeros(len(train)); oof_y = train["target"].to_numpy(float)
         test_pred = np.zeros(len(test))
-        val_feat = np.zeros((len(train), 512), dtype="float32")
-        test_feat = np.zeros((len(test), 512), dtype="float32")
+        val_feat = test_feat = None   # 特徴次元はbackboneから動的に確保
         for fold in range(cfg.n_folds):
             ck = os.path.join(cdir, f"ft_{task}_{a.backbone}_f{fold}.npz")
             if os.path.exists(ck):
@@ -114,6 +118,10 @@ def main():
                          val_feat=r["val_feat"], test_pred=r["test_pred"], test_feat=r["test_feat"],
                          best_rmse=r["best_rmse"])
                 z = np.load(ck)
+            if val_feat is None:   # 初fold で特徴次元を確定して確保
+                fdim = z["val_feat"].shape[1]
+                val_feat = np.zeros((len(train), fdim), dtype="float32")
+                test_feat = np.zeros((len(test), fdim), dtype="float32")
             oof[z["oof_idx"]] = z["oof_pred"]
             val_feat[z["oof_idx"]] = z["val_feat"]
             test_pred += z["test_pred"] / cfg.n_folds

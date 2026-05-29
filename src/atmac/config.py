@@ -11,7 +11,7 @@ class CFG:
     seed: int = 42
     n_folds: int = 5
     img_size: int = 224                 # 全画像 長辺224配布。224で十分(>224は無意味)
-    num_workers: int = 2
+    num_workers: int = 8                # A100は~12コア。DINOのCPU aug律速を解消
     n_classes: int = 4
     # 5位解法のドメイン特化 正規化統計
     mean: tuple = (0.776, 0.742, 0.669)
@@ -23,9 +23,11 @@ class CFG:
     ssl_backbone: str = "resnet18d"
     ssl_epochs: int = 100               # 本番は300+推奨
     ssl_img_size: int = 128             # SSLは低解像度で十分高速（FTは img_size=224）
-    ssl_batch: int = 128
-    ssl_lr: float = 5e-4
+    ssl_batch: int = 256                # A100 40GBで活用（ステップ数半減）
+    ssl_lr: float = 1e-3                # lightly DINO標準。warmup+cosineで運用
+    ssl_warmup_epochs: int = 10         # SSL LR linear warmup
     ssl_local_crops: int = 6            # DINOローカルクロップ数（減らすと高速）
+    ckpt_every: int = 10                # SSLチェックポイント保存間隔（切断対策）
 
     # ---- ファインチューニング ----
     backbone: str = "resnet18d"

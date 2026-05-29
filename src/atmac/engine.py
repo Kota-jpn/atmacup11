@@ -95,10 +95,12 @@ def train_one_fold(cfg, train, photo_dir, fold, mat_cols,
     tr_df = train[train.fold != fold]
     va_df = train[train.fold == fold]
     tr_tf, va_tf = build_transforms(cfg, True), build_transforms(cfg, False)
+    extra = dict(persistent_workers=True, prefetch_factor=4) if cfg.num_workers > 0 else {}
     mk = lambda df, tf, mode: DataLoader(
         ArtDataset(df, photo_dir, tf, mat_cols, mode),
         batch_size=cfg.batch_size, shuffle=(mode == "train"),
-        num_workers=cfg.num_workers, pin_memory=True, drop_last=(mode == "train"))
+        num_workers=cfg.num_workers, pin_memory=True,
+        drop_last=(mode == "train"), **extra)
     tr_dl = mk(tr_df, tr_tf, "train")
     va_dl = mk(va_df, va_tf, "val")
 

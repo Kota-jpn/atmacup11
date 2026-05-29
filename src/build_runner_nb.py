@@ -39,18 +39,21 @@ print('photos', len(glob.glob(f'{DATA}/photos/*.jpg')), '| csv', [os.path.basena
 import wandb; wandb.login()"""),
 
 ("code", """# 4.【まず疎通確認】GPUで超小規模に1周（数分）。エラーが無いか確認用。
-!cd atmacup11 && git pull -q && OMP_NUM_THREADS=2 PYTHONPATH=src python -m atmac.run \\
+!cd atmacup11 && git pull -q && OMP_NUM_THREADS=4 PYTHONPATH=src python -m atmac.run \\
   --data_dir /content/data --out_dir /content/atmac_smoke \\
-  --ssl_epochs 2 --ft_epochs 2 --img_size 128 --batch_size 32 --limit 400 --tasks cls,reg"""),
+  --ssl_epochs 3 --ssl_img_size 96 --ft_epochs 2 --img_size 128 \\
+  --ssl_batch 128 --batch_size 64 --num_workers 8 --limit 400 --tasks cls,reg"""),
 
-("code", """# 5.【本番】フル学習。SSL(DINO 100ep) → cls+reg 5fold FT(30ep) → blend+stack → 提出csv
-# ※ GPU数時間。SSL重み/各fold結果は Drive にキャッシュされ、再実行で続きから。
-# ssl_epochs を 300 に上げると上位解法水準（時間と相談）。
-!cd atmacup11 && git pull -q && OMP_NUM_THREADS=2 PYTHONPATH=src python -m atmac.run \\
+("code", """# 5.【本番】フル学習。SSL(DINO) → cls+reg 5fold FT → blend+stack → 提出csv
+# ※ A100想定。num_workers/ssl_batch でデータローダ律速を解消、AMPで高速化。
+# SSL重みは ckpt_every 毎に Drive 保存＝切断しても再実行で続きから（ssl_epochs 300 も安全）。
+# まず100epで1本→LB確認→300epへ、が安全。
+!cd atmacup11 && git pull -q && OMP_NUM_THREADS=4 PYTHONPATH=src python -m atmac.run \\
   --data_dir /content/data \\
   --out_dir /content/drive/MyDrive/atmaCup11/outputs \\
-  --ssl_method dino --ssl_epochs 100 --ft_epochs 30 \\
-  --backbone resnet18d --img_size 224 --batch_size 64 --tasks cls,reg --wandb"""),
+  --ssl_method dino --ssl_epochs 100 --ssl_img_size 128 --ft_epochs 30 \\
+  --backbone resnet18d --img_size 224 \\
+  --ssl_batch 256 --batch_size 128 --num_workers 8 --tasks cls,reg --wandb"""),
 
 ("md", """## 提出
 `Drive/atmaCup11/outputs/submissions/` に
