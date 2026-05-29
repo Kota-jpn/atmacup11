@@ -145,7 +145,9 @@ def main():
     except Exception as e:
         print("[STACK] skipped:", e)
 
-    assert len(blend_test) == len(sub_ss), "提出行数不一致"
+    assert len(blend_test) == len(test), "予測行数がtestと不一致"
+    if not a.limit:
+        assert len(blend_test) == len(sub_ss), "提出行数がsample_submissionと不一致"
     print("DONE. submissions ->", sdir)
 
 
