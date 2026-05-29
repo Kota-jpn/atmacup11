@@ -1,0 +1,13 @@
+# ローカルEDA/スモークテスト用。Colabは既存torch+下記をpip追加。
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+pillow
+tqdm
+wandb        # 実験追跡 + 重み(Artifacts)保存
+timm         # backbone (resnet18d等, pretrained=Falseで使用)
+lightly      # SSL (DINO/SimSiam)。フレームワークのみ＝pretrained重み不使用
+lightgbm     # 最終スタッキング
+# torch / torchvision はColab既存。ローカルはCPU版を別途: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu

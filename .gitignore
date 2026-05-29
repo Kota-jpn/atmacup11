@@ -1,0 +1,10 @@
+# データ・出力はgit管理しない（home-rootedリポジトリのため明示的に除外）
+data/
+outputs/
+.venv/
+wandb/
+*.pth
+*.ckpt
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
